@@ -1,0 +1,10 @@
+# Database-wachtwoord voor compose.yaml; nooit in git.
+.env
+
+# Terraform: state en tfvars kunnen sleutels en wachtwoorden bevatten.
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/crash.log

@@ -1,0 +1,12 @@
+# Elk uur sbom-naar-dtrack.service; ook als de VM een tijd uit stond (Persistent). Naar /etc/systemd/system/.
+[Unit]
+Description=Elk uur de SBoM van main naar Dependency-Track
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

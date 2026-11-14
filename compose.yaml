@@ -1,0 +1,54 @@
+# Dependency-Track 5 op een VM zonder publiek IP, naar de quickstart van het project (DependencyTrack/docs,
+# docs/tutorials/docker-compose.quickstart.yml), met vaste versies en een eigen databasewachtwoord.
+# Alleen op 127.0.0.1: bekijken via een SSH-tunnel, zie LEESMIJ.md.
+name: dependency-track
+
+services:
+  apiserver:
+    # Vast op versie en digest; 5.1.2 is van 5 oktober 2026, dus minstens twee weken oud.
+    image: ghcr.io/dependencytrack/apiserver:5.1.2@sha256:967213ebdca3f9ccb5a7ff9d85b7a0c7bfba4ca5a52467a940c072cc3123d14c
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Zoals de quickstart; de VM heeft daarom minstens 4 GB nodig, met de database en het systeem erbij.
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    environment:
+      DT_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/dtrack"
+      DT_DATASOURCE_USERNAME: "dtrack"
+      DT_DATASOURCE_PASSWORD: "${DT_DB_PASSWORD:?zet DT_DB_PASSWORD in .env}"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - "apiserver-data:/data"
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/dependencytrack/frontend:5.1.2@sha256:69c36a0f4bfce9984e76ae5d56ed0b3e036e67c7e7505d8b52993d8c72d284de
+    environment:
+      # Hier zoekt de browser de API; via de SSH-tunnel is dat localhost:8080 op je eigen pc.
+      API_BASE_URL: "http://localhost:8080"
+    ports:
+      - "127.0.0.1:8081:8080"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_DB: "dtrack"
+      POSTGRES_USER: "dtrack"
+      POSTGRES_PASSWORD: "${DT_DB_PASSWORD:?zet DT_DB_PASSWORD in .env}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - "postgres-data:/var/lib/postgresql"
+    restart: unless-stopped
+
+volumes:
+  apiserver-data: {}
+  postgres-data: {}

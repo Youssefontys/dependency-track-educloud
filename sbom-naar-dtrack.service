@@ -1,0 +1,20 @@
+# Levert de SBoM van de laatste build van main aan Dependency-Track; gestart door sbom-naar-dtrack.timer.
+# Naar /etc/systemd/system/; het script naar /opt/sbom-naar-dtrack/.
+[Unit]
+Description=SBoM van main naar Dependency-Track
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# Een tijdelijke gebruiker zonder rechten; systemd leest de geheimen als root en geeft ze alleen aan dit proces.
+DynamicUser=yes
+EnvironmentFile=/etc/sbom-naar-dtrack.env
+StateDirectory=sbom-naar-dtrack
+Environment=STATE=/var/lib/sbom-naar-dtrack/laatste
+ExecStart=/usr/bin/python3 /opt/sbom-naar-dtrack/sbom-naar-dtrack.py
+# Mag verder niets op het systeem schrijven en geen rechten bijkrijgen.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
