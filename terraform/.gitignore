@@ -1,0 +1,7 @@
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+# Breed, niet alleen "terraform.tfvars": elk .tfvars-bestand kan sleutels bevatten.
+*.tfvars
+crash.log

@@ -1,0 +1,18 @@
+# Kopieer naar terraform.tfvars; staat al in .gitignore, nooit zelf in git zetten.
+# Alternatief voor de drie cloudstack_*-regels: zet CLOUDSTACK_API_URL, CLOUDSTACK_API_KEY
+# en CLOUDSTACK_SECRET_KEY als omgevingsvariabelen en laat ze hier weg.
+
+cloudstack_api_url    = "https://<educloud-endpoint>/client/api"
+cloudstack_api_key    = ""
+cloudstack_secret_key = ""
+
+# Opzoeken in de Educloud-interface. Exacte naam, hoofdlettergevoelig.
+service_offering = "" # Compute Offerings; minstens 4 GB RAM (zie LEESMIJ.md)
+template         = "" # Templates; een Ubuntu-image met systemd
+zone             = "" # Infrastructure > Zones
+
+# Alleen invullen als je account meer dan één netwerk heeft (Network in de UI).
+# network_id = ""
+
+# Pas aan op wat het gekozen template werkelijk als inlog-gebruiker heeft.
+ssh_user = "ubuntu"
