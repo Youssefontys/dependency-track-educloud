@@ -1,6 +1,6 @@
 # Dependency-Track 5 op een VM zonder publiek IP, naar de quickstart van het project (DependencyTrack/docs,
 # docs/tutorials/docker-compose.quickstart.yml), met vaste versies en een eigen databasewachtwoord.
-# Alleen op 127.0.0.1: bekijken via een SSH-tunnel, zie LEESMIJ.md.
+# Alleen op 127.0.0.1: bekijken via een SSH-tunnel, zie README.md.
 name: dependency-track
 
 services:

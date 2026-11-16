@@ -2,7 +2,7 @@
 Voor een VM zonder publiek IP: het script haalt zelf op, dus GitHub hoeft de VM niet te bereiken. Alleen de
 standaardbibliotheek; werkt op Linux en Windows. Draait elk uur via sbom-naar-dtrack.timer.
 Instellingen in de omgeving (zie sbom-naar-dtrack.env.example): GITHUB_TOKEN en DT_API_KEY, en optioneel DT_URL,
-REPO, PROJECT en STATE.
+REPO, WORKFLOW, PROJECT en STATE.
 Gebruik: python3 sbom-naar-dtrack.py"""
 import base64
 import io
@@ -33,8 +33,10 @@ def setting(name, default=None, pattern=None):
 TOKEN = setting("GITHUB_TOKEN", pattern=r"(?:github_pat_|ghp_)[A-Za-z0-9_]{20,255}")
 API_KEY = setting("DT_API_KEY", pattern=r"[A-Za-z0-9_\-]{20,200}")
 DT_URL = setting("DT_URL", "http://127.0.0.1:8080", r"https?://[A-Za-z0-9.\-]+(?::\d{1,5})?")
-REPO = setting("REPO", "Youssefontys/secure-application", r"[A-Za-z0-9\-]{1,39}/[A-Za-z0-9._\-]{1,100}")
-PROJECT = setting("PROJECT", "secure-application", r"[A-Za-z0-9._ \-]{1,100}")
+REPO = setting("REPO", "Youssefontys/secure-app", r"[A-Za-z0-9\-]{1,39}/[A-Za-z0-9._\-]{1,100}")
+# De bestandsnaam van de workflow die de SBoM maakt; een andere naam geeft HTTP 404.
+WORKFLOW = setting("WORKFLOW", "CI-image.yml", r"[A-Za-z0-9._\-]{1,100}\.ya?ml")
+PROJECT = setting("PROJECT", "secure-app", r"[A-Za-z0-9._ \-]{1,100}")
 STATE = pathlib.Path(setting("STATE", str(pathlib.Path.home() / ".sbom-naar-dtrack")))
 
 
@@ -74,8 +76,8 @@ def dtrack(method, path, body=None):
 
 
 def main():
-    # De laatste geslaagde build van main na een push: daar hoort de SBoM bij die de pipeline scande (image.yml).
-    runs = github(f"/repos/{REPO}/actions/workflows/image.yml/runs?branch=main&event=push&status=success&per_page=1")
+    # De laatste geslaagde build van main na een push: daar hoort de SBoM bij die de pipeline scande.
+    runs = github(f"/repos/{REPO}/actions/workflows/{WORKFLOW}/runs?branch=main&event=push&status=success&per_page=1")
     if not runs.get("workflow_runs"):
         sys.exit("Geen geslaagde build van main gevonden.")
     run = runs["workflow_runs"][0]
@@ -100,6 +102,8 @@ def main():
     else:
         print("Dependency-Track verwerkt de SBoM nog; kijk later in de interface.")
     STATE.parent.mkdir(parents=True, exist_ok=True)
+    # De SBoM zelf ernaast: dt-meting.py vergelijk scant precies deze met Trivy.
+    STATE.with_name("laatste.cdx.json").write_bytes(sbom)
     STATE.write_text(sha + "\n", encoding="utf-8")
     print(f"Geleverd: de SBoM van {sha[:7]} (run {run['id']}) aan {PROJECT}, versie main.")
 

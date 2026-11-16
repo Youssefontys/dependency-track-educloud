@@ -18,7 +18,7 @@ sudo mkdir -p /opt/dependency-track /opt/sbom-naar-dtrack
 
 sudo mv /tmp/compose.yaml /opt/dependency-track/compose.yaml
 
-# Wachtwoord hier op de VM zelf genereren, net als in de handmatige LEESMIJ-stappen: zo komt
+# Wachtwoord hier op de VM zelf genereren, net als in de handmatige README-stappen: zo komt
 # het nooit in terraform.tfstate of over SSH als los bestand, alleen hier op schijf.
 if [ ! -f /opt/dependency-track/.env ]; then
   echo "DT_DB_PASSWORD=$(openssl rand -hex 32)" | sudo tee /opt/dependency-track/.env > /dev/null
@@ -27,6 +27,7 @@ sudo chown root:root /opt/dependency-track/.env
 sudo chmod 600 /opt/dependency-track/.env
 
 sudo mv /tmp/sbom-naar-dtrack.py /opt/sbom-naar-dtrack/sbom-naar-dtrack.py
+sudo mv /tmp/dt-meting.py /opt/sbom-naar-dtrack/dt-meting.py
 sudo mv /tmp/sbom-naar-dtrack.service /etc/systemd/system/sbom-naar-dtrack.service
 sudo mv /tmp/sbom-naar-dtrack.timer /etc/systemd/system/sbom-naar-dtrack.timer
 
@@ -44,5 +45,5 @@ sudo docker compose up -d
 sudo systemctl daemon-reload
 
 echo "Klaar: Docker draait, Dependency-Track start op (duurt even bij de eerste keer)."
-echo "Resterend handwerk staat in LEESMIJ.md vanaf 'Maak in Dependency-Track...':"
+echo "Resterend handwerk staat in README.md vanaf 'Maak in Dependency-Track...':"
 echo "  admin-wachtwoord zetten, team + API-key, GitHub-token, /etc/sbom-naar-dtrack.env invullen, timer inschakelen."

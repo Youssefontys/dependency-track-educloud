@@ -1,4 +1,4 @@
-# Provisioneert de VM uit LEESMIJ.md op Fontys Educloud (Apache CloudStack) en voert daarna
+# Provisioneert de VM uit README.md op Fontys Educloud (Apache CloudStack) en voert daarna
 # zelf stap 1 t/m 4 van "Opzetten" uit: bestanden kopiëren, .env aanmaken, docker compose up,
 # service/timer installeren. Daarna dt-bootstrap.py: stap 5 (wachtwoord) en de DT_API_KEY-regel
 # van stap 7, via Dependency-Track's eigen REST API. Alleen het GitHub-token (stap 6) en het
@@ -7,7 +7,7 @@
 #
 # Provisioners verbinden over SSH naar het privé-IP van de VM, dus `terraform apply` moet
 # draaien vanaf een machine die al op de Fontys-VPN zit (dezelfde eis als de SSH-tunnel in
-# LEESMIJ.md stap 4). Status: geschreven, nog niet tegen een echte Educloud-omgeving gedraaid.
+# README.md stap 4). Status: geschreven, nog niet tegen een echte Educloud-omgeving gedraaid.
 
 terraform {
   required_version = ">= 1.5.0"
@@ -98,6 +98,11 @@ resource "null_resource" "bootstrap" {
   provisioner "file" {
     source      = "${path.module}/../dt-bootstrap.py"
     destination = "/tmp/dt-bootstrap.py"
+  }
+
+  provisioner "file" {
+    source      = "${path.module}/../dt-meting.py"
+    destination = "/tmp/dt-meting.py"
   }
 
   provisioner "remote-exec" {

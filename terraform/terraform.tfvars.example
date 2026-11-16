@@ -7,7 +7,7 @@ cloudstack_api_key    = ""
 cloudstack_secret_key = ""
 
 # Opzoeken in de Educloud-interface. Exacte naam, hoofdlettergevoelig.
-service_offering = "" # Compute Offerings; minstens 4 GB RAM (zie LEESMIJ.md)
+service_offering = "" # Compute Offerings; minstens 4 GB RAM (zie README.md)
 template         = "" # Templates; een Ubuntu-image met systemd
 zone             = "" # Infrastructure > Zones
 
