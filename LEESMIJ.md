@@ -26,6 +26,7 @@ Educloud-omgeving gedraaid.
 | `sbom-naar-dtrack.service`, `.timer` | Draaien het script elk uur, als tijdelijke gebruiker zonder rechten |
 | `terraform/` | Zet de VM neer op Educloud en doet stap 1 t/m 4 van "Opzetten" voor je; optioneel, zie onder |
 | `terraform/check-verbinding.py` | Los van Terraform: checkt bereik en API-sleutels voor je iets aanmaakt |
+| `dt-bootstrap.py` | Doet stap 5 (wachtwoord) en de `DT_API_KEY`-regel van stap 7, via Dependency-Track's eigen REST API |
 
 ## Wat de VM nodig heeft
 
@@ -60,8 +61,11 @@ Educloud-omgeving gedraaid.
    ```
    Dit moet draaien vanaf een machine die al op de Fontys-VPN zit: de provisioners verbinden na het
    aanmaken direct over SSH met het privé-IP van de VM, dezelfde eis als de tunnel in stap 4 hieronder.
-5. Ga daarna direct verder bij stap 5 hieronder ("Maak in Dependency-Track..."); de VM draait dan al,
-   met Dependency-Track gestart en de service/timer-bestanden op hun plek, maar de timer nog uitgeschakeld.
+5. `terraform apply` draait na `bootstrap.sh` ook meteen `dt-bootstrap.py` op de VM: wachtwoord
+   zetten, team + permissies + API-key aanmaken via Dependency-Track's REST API, en `DT_API_KEY`
+   alvast in `/etc/sbom-naar-dtrack.env` zetten. Het admin-wachtwoord staat na afloop in
+   `/root/.dt-admin-password` op de VM (root-only). Ga daarna direct verder bij stap 6 hieronder
+   (het GitHub-token, dat kan niet geautomatiseerd).
 
 ## Opzetten (met de hand, of verder na Terraform)
 
@@ -82,7 +86,8 @@ Educloud-omgeving gedraaid.
    Log in als `admin` met wachtwoord `admin`, en kies meteen een nieuw wachtwoord; Dependency-Track vraagt daar zelf om.
 5. Maak in Dependency-Track, onder Administration en Access Management, een team met alleen de permissies
    `BOM_UPLOAD` en `PROJECT_CREATION_UPLOAD`, en maak daar een API-key. De namen in de interface kunnen per versie
-   iets verschillen.
+   iets verschillen. Of: `sudo python3 dt-bootstrap.py` op de VM, doet dit (en het wachtwoord hierboven) via de
+   REST API; het admin-wachtwoord komt dan in `/root/.dt-admin-password` te staan.
 6. Maak op GitHub een fine-grained token: alleen de repository `secure-application`, alleen "Actions: Read-only", met
    een vervaldatum. Het artifact met de SBoM downloaden vraagt een token, ook bij een openbare repo.
 7. Zet het script en de instellingen op hun plek:

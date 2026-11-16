@@ -1,7 +1,9 @@
 # Provisioneert de VM uit LEESMIJ.md op Fontys Educloud (Apache CloudStack) en voert daarna
 # zelf stap 1 t/m 4 van "Opzetten" uit: bestanden kopiëren, .env aanmaken, docker compose up,
-# service/timer installeren. Stap 5 t/m 9 (DT-wachtwoord, team/API-key, GitHub-token, timer
-# inschakelen) blijven handwerk: dat kan niet voor het eerste bezoek aan de web-UI bestaan.
+# service/timer installeren. Daarna dt-bootstrap.py: stap 5 (wachtwoord) en de DT_API_KEY-regel
+# van stap 7, via Dependency-Track's eigen REST API. Alleen het GitHub-token (stap 6) en het
+# daadwerkelijk starten/inschakelen van de sbom-service (stap 8-9) blijven handwerk: dat token
+# kan GitHub's eigen API bewust niet zelf aanmaken.
 #
 # Provisioners verbinden over SSH naar het privé-IP van de VM, dus `terraform apply` moet
 # draaien vanaf een machine die al op de Fontys-VPN zit (dezelfde eis als de SSH-tunnel in
@@ -93,7 +95,18 @@ resource "null_resource" "bootstrap" {
     destination = "/tmp/sbom-naar-dtrack.env.example"
   }
 
+  provisioner "file" {
+    source      = "${path.module}/../dt-bootstrap.py"
+    destination = "/tmp/dt-bootstrap.py"
+  }
+
   provisioner "remote-exec" {
     script = "${path.module}/bootstrap.sh"
+  }
+
+  # Los van bootstrap.sh: dt-bootstrap.py heeft zijn eigen, lange wachttijd nodig (de eerste
+  # start van Dependency-Track duurt door het ophalen van de kwetsbaarhedendata zelf al een tijd).
+  provisioner "remote-exec" {
+    inline = ["sudo python3 /tmp/dt-bootstrap.py"]
   }
 }
