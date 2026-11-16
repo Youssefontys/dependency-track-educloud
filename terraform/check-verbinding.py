@@ -82,6 +82,11 @@ def main():
     for n in networks:
         print(f"  - {n.get('name')}  (id: {n.get('id')}, state: {n.get('state')})")
 
+    projects = call("listProjects").get("listprojectsresponse", {}).get("project", [])
+    print(f"\n{len(projects)} project(en) (gedeelde team-omgevingen):")
+    for p in projects:
+        print(f"  - {p.get('name')}  (id: {p.get('id')}, account: {p.get('account')})")
+
 
 try:
     main()
