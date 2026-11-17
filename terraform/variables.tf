@@ -25,7 +25,7 @@ variable "instance_name" {
 }
 
 variable "service_offering" {
-  description = "Exacte naam van het compute-profiel in Educloud (Compute Offerings in de UI). Minstens 4 GB RAM, zie LEESMIJ.md."
+  description = "Exacte naam van het compute-profiel in Educloud (Compute Offerings in de UI). Minstens 4 GB RAM, zie README.md."
   type        = string
 }
 

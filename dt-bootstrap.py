@@ -1,4 +1,4 @@
-"""Automatiseert stap 5 t/m 8 van LEESMIJ.md tegen Dependency-Track's eigen REST API: het
+"""Automatiseert stap 5 t/m 8 van README.md tegen Dependency-Track's eigen REST API: het
 geforceerde admin-wachtwoord zetten, een team met de juiste permissies maken, en daar een
 API-key voor genereren, in /etc/sbom-naar-dtrack.env. Draait op de VM zelf (praat met
 127.0.0.1:8080). Alleen de standaardbibliotheek.
@@ -32,6 +32,10 @@ ENV_FILE = "/etc/sbom-naar-dtrack.env"
 PASSWORD_FILE = "/root/.dt-admin-password"
 TEAM_NAME = "sbom-naar-dtrack"
 PERMISSIONS = ("BOM_UPLOAD", "PROJECT_CREATION_UPLOAD")
+# Voor dt-meting.py: alleen lezen. Gecontroleerd in 5.1.2: het opvragen van meldingen vraagt VIEW_VULNERABILITY
+# (FindingResource.java); het opzoeken van het project op naam VIEW_PORTFOLIO.
+READ_TEAM_NAME = "dt-meting"
+READ_PERMISSIONS = ("VIEW_PORTFOLIO", "VIEW_VULNERABILITY")
 
 
 def request(method, path, body=None, token=None, form=None):
@@ -107,38 +111,38 @@ def get_admin_token():
     return body.decode().strip()
 
 
-def get_or_create_team(token):
-    status, body = request("PUT", "/team", body={"name": TEAM_NAME}, token=token)
+def get_or_create_team(token, name):
+    status, body = request("PUT", "/team", body={"name": name}, token=token)
     if status == 201:
-        print(f"Team '{TEAM_NAME}' aangemaakt.")
+        print(f"Team '{name}' aangemaakt.")
         return json.loads(body)["uuid"]
     if status == 409:
-        print(f"Team '{TEAM_NAME}' bestaat al, hergebruiken.")
+        print(f"Team '{name}' bestaat al, hergebruiken.")
         _, body = request("GET", "/team", token=token)
         for team in json.loads(body):
-            if team["name"] == TEAM_NAME:
+            if team["name"] == name:
                 return team["uuid"]
-        sys.exit(f"Team '{TEAM_NAME}' meldt zich als bestaand (409) maar staat niet in de lijst.")
+        sys.exit(f"Team '{name}' meldt zich als bestaand (409) maar staat niet in de lijst.")
     sys.exit(f"Team aanmaken gaf onverwachte status {status}.")
 
 
-def grant_permissions(token, team_uuid):
-    for permission in PERMISSIONS:
+def grant_permissions(token, team_uuid, permissions):
+    for permission in permissions:
         status, _ = request("POST", f"/permission/{permission}/team/{team_uuid}", body={}, token=token)
         if status not in (200, 304):
             sys.exit(f"Permissie {permission} toekennen gaf status {status}.")
         print(f"Permissie {permission}: in orde (status {status}).")
 
 
-def ensure_api_key(token, team_uuid):
+def ensure_api_key(token, team_uuid, variable):
     try:
         with open(ENV_FILE, encoding="utf-8") as f:
             lines = f.readlines()
     except FileNotFoundError:
         lines = []
     for line in lines:
-        if line.startswith("DT_API_KEY=") and line.strip() != "DT_API_KEY=":
-            print(f"{ENV_FILE} heeft al een DT_API_KEY, niets nieuws gegenereerd.")
+        if line.startswith(f"{variable}=") and line.strip() != f"{variable}=":
+            print(f"{ENV_FILE} heeft al een {variable}, niets nieuws gegenereerd.")
             return
 
     status, body = request("PUT", f"/team/{team_uuid}/key", token=token)
@@ -146,20 +150,22 @@ def ensure_api_key(token, team_uuid):
         sys.exit(f"API-key genereren gaf status {status}.")
     key = json.loads(body)["key"]
 
-    new_lines = [l for l in lines if not l.startswith("DT_API_KEY=")]
-    new_lines.append(f"DT_API_KEY={key}\n")
+    new_lines = [l for l in lines if not l.startswith(f"{variable}=")]
+    new_lines.append(f"{variable}={key}\n")
     with open(ENV_FILE, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
     os.chmod(ENV_FILE, 0o600)
-    print(f"API-key gegenereerd en in {ENV_FILE} gezet.")
+    print(f"API-key gegenereerd en als {variable} in {ENV_FILE} gezet.")
 
 
 def main():
     wait_for_dt()
     token = get_admin_token()
-    team_uuid = get_or_create_team(token)
-    grant_permissions(token, team_uuid)
-    ensure_api_key(token, team_uuid)
+    # Twee teams, elk met alleen wat het nodig heeft: leveren mag niet lezen, meten mag niet leveren.
+    for name, permissions, variable in ((TEAM_NAME, PERMISSIONS, "DT_API_KEY"), (READ_TEAM_NAME, READ_PERMISSIONS, "DT_READ_KEY")):
+        team_uuid = get_or_create_team(token, name)
+        grant_permissions(token, team_uuid, permissions)
+        ensure_api_key(token, team_uuid, variable)
     print("\nKlaar. Resterend handwerk: alleen nog het GitHub-token zelf aanmaken en in "
           f"{ENV_FILE} zetten (GITHUB_TOKEN=...), en dan:")
     print("  sudo systemctl daemon-reload && sudo systemctl start sbom-naar-dtrack.service")

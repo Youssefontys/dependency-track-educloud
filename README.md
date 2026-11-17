@@ -5,7 +5,7 @@ publiek IP, dus GitHub kan hem niets sturen. Daarom haalt een script op de VM ze
 geslaagde build van `main` op, en levert hem aan Dependency-Track. Je bekijkt alles via een SSH-tunnel; niets staat
 open op internet, dus in de hacking week is dit ook geen doelwit.
 
-**Status: voorbeeld, nog niet gedraaid.** Gecontroleerd is wel: de versies, de digests en de quickstart van het project
+**Status: de opzet is op Educloud gedraaid; de metingen nog niet.** Wat er gemeten is, hoort onder "Meten" te komen, met datum; zolang daar niets staat, is er niets gemeten. Gecontroleerd is wel: de versies, de digests en de quickstart van het project
 (5.1.2), en dat `PUT /api/v1/bom` met projectnaam, versie en `autoCreate` in 5.1.2 bestaat (bron:
 `BomResource.java` en `BomSubmitRequest.java` in DependencyTrack/dependency-track).
 
@@ -26,7 +26,8 @@ Educloud-omgeving gedraaid.
 | `sbom-naar-dtrack.service`, `.timer` | Draaien het script elk uur, als tijdelijke gebruiker zonder rechten |
 | `terraform/` | Zet de VM neer op Educloud en doet stap 1 t/m 4 van "Opzetten" voor je; optioneel, zie onder |
 | `terraform/check-verbinding.py` | Los van Terraform: checkt bereik en API-sleutels voor je iets aanmaakt |
-| `dt-bootstrap.py` | Doet stap 5 (wachtwoord) en de `DT_API_KEY`-regel van stap 7, via Dependency-Track's eigen REST API |
+| `dt-bootstrap.py` | Doet stap 5 (wachtwoord) en de regels `DT_API_KEY` en `DT_READ_KEY` van stap 7, via Dependency-Track's eigen REST API |
+| `dt-meting.py` | De twee metingen voor het onderzoek: elk uur een regel in `metingen.csv`, en de vergelijking met Trivy en de VEX |
 
 ## Wat de VM nodig heeft
 
@@ -88,11 +89,12 @@ Educloud-omgeving gedraaid.
    `BOM_UPLOAD` en `PROJECT_CREATION_UPLOAD`, en maak daar een API-key. De namen in de interface kunnen per versie
    iets verschillen. Of: `sudo python3 dt-bootstrap.py` op de VM, doet dit (en het wachtwoord hierboven) via de
    REST API; het admin-wachtwoord komt dan in `/root/.dt-admin-password` te staan.
-6. Maak op GitHub een fine-grained token: alleen de repository `secure-application`, alleen "Actions: Read-only", met
+6. Maak op GitHub een fine-grained token: alleen de repository `secure-app`, alleen "Actions: Read-only", met
    een vervaldatum. Het artifact met de SBoM downloaden vraagt een token, ook bij een openbare repo.
 7. Zet het script en de instellingen op hun plek:
    ```bash
    sudo install -D -m 0644 sbom-naar-dtrack.py /opt/sbom-naar-dtrack/sbom-naar-dtrack.py
+   sudo install -m 0644 dt-meting.py /opt/sbom-naar-dtrack/dt-meting.py
    sudo install -m 0600 sbom-naar-dtrack.env.example /etc/sbom-naar-dtrack.env
    sudo install -m 0644 sbom-naar-dtrack.service sbom-naar-dtrack.timer /etc/systemd/system/
    ```
@@ -102,11 +104,37 @@ Educloud-omgeving gedraaid.
    sudo systemctl daemon-reload && sudo systemctl start sbom-naar-dtrack.service
    journalctl -u sbom-naar-dtrack.service -n 20
    ```
-   Daarna staat het project `secure-application`, versie `main`, in Dependency-Track.
+   Daarna staat het project `secure-app`, versie `main`, in Dependency-Track.
 9. Elk uur automatisch:
    ```bash
    sudo systemctl enable --now sbom-naar-dtrack.timer
    ```
+
+## Meten
+
+Wat Dependency-Track toevoegt aan de scan in de pipeline, in twee metingen. Beide lezen met `DT_READ_KEY`, een key die
+alleen mag lezen.
+
+**1. Hoe snel zie je een nieuw lek?** Na elke levering schrijft `dt-meting.py log` een regel in
+`/var/lib/sbom-naar-dtrack/metingen.csv`: het moment, de commit van de SBoM, het aantal meldingen per ernst, en welke lekken
+van HIGH en CRITICAL het zijn. Verandert die laatste kolom terwijl de commit gelijk blijft, dan zag Dependency-Track een
+nieuw lek zonder dat er gebouwd is. Leg dat moment naast de eerste run van `CI-image.yml` die op hetzelfde lek faalt: het
+verschil is de meting. Dat vraagt geduld: er moet eerst een nieuw lek bekend worden.
+
+**2. Wat doet het met de VEX?** Eén keer met de hand, nadat er een SBoM geleverd is:
+
+```bash
+sudo python3 /opt/sbom-naar-dtrack/dt-meting.py vergelijk
+```
+
+Het scant dezelfde SBoM met Trivy, zonder en met `vex/openvex.json` van die commit, en legt de uitkomst naast de meldingen
+van Dependency-Track: hoeveel lekken de VEX in de pipeline wegfiltert die in Dependency-Track open staan, en welke lekken
+alleen de een of de ander kent. De uitkomst staat ook in `/var/lib/sbom-naar-dtrack/vergelijking-<commit>.json`.
+
+| Meting | Datum | Uitkomst |
+|---|---|---|
+| 1. Nieuw lek zonder build | nog niet gemeten | |
+| 2. Trivy, de VEX en Dependency-Track | nog niet gemeten | |
 
 ## Goed om te weten
 
@@ -116,7 +144,7 @@ Educloud-omgeving gedraaid.
 - **De VEX uit de repo leest Dependency-Track niet.** `vex/openvex.json` is OpenVEX, en Dependency-Track 5.1.2 leest
   alleen CycloneDX-VEX. De beslissingen uit de VEX zet je dus in Dependency-Track zelf, of je zet de VEX om naar
   CycloneDX.
-- **Dezelfde SBoM als de pipeline.** Het script levert de SBoM die Trivy in `image.yml` maakte. Volgens deelvraag 3
+- **Dezelfde SBoM als de pipeline.** Het script levert de SBoM die Trivy in `CI-image.yml` maakte. Volgens deelvraag 3
   ziet die niet wat een wheel zelf meeneemt; Dependency-Track ziet dus ook niet meer dan die SBoM.
 - **Bijwerken gaat met de hand.** De images staan vast op digest. Een nieuwe versie zet je zelf in `compose.yaml`,
   na de upgrade notes van het project; Dependabot kijkt niet op de VM.

@@ -13,6 +13,8 @@ EnvironmentFile=/etc/sbom-naar-dtrack.env
 StateDirectory=sbom-naar-dtrack
 Environment=STATE=/var/lib/sbom-naar-dtrack/laatste
 ExecStart=/usr/bin/python3 /opt/sbom-naar-dtrack/sbom-naar-dtrack.py
+# Daarna een regel in /var/lib/sbom-naar-dtrack/metingen.csv; het minteken: een mislukte meting is geen mislukte levering.
+ExecStartPost=-/usr/bin/python3 /opt/sbom-naar-dtrack/dt-meting.py log
 # Mag verder niets op het systeem schrijven en geen rechten bijkrijgen.
 NoNewPrivileges=yes
 ProtectSystem=strict
