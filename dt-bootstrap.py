@@ -52,9 +52,13 @@ def request(method, path, body=None, token=None, form=None):
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(f"{BASE}{path}", data=data, method=method, headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as r:
-        raw = r.read()
-        return r.status, raw
+    # urlopen gooit bij elke status van 300 of hoger een HTTPError; dan kwam de code hieronder nooit bij een 409
+    # ("team bestaat al") of 304 ("permissie stond er al"). Daarom de status teruggeven in plaats van stoppen.
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
 
 
 def wait_for_dt():
