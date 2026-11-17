@@ -7,3 +7,6 @@ terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/*.tfvars
 terraform/crash.log
+
+# Bytecode van Python, die ontstaat bij het draaien; hoort niet in git.
+__pycache__/
