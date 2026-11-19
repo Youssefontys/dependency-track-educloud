@@ -44,6 +44,12 @@ cd /opt/dependency-track
 sudo docker compose up -d
 sudo systemctl daemon-reload
 
-echo "Klaar: Docker draait, Dependency-Track start op (duurt even bij de eerste keer)."
-echo "Resterend handwerk staat in README.md vanaf 'Maak in Dependency-Track...':"
-echo "  admin-wachtwoord zetten, team + API-key, GitHub-token, /etc/sbom-naar-dtrack.env invullen, timer inschakelen."
+# Geen token of andere externe sleutel voor nodig (in tegenstelling tot het GitHub-token hieronder),
+# dus dit hoeft geen handwerk te blijven. Zonder GITHUB_TOKEN faalt elke run gewoon totdat die er
+# wel is; dat is onschuldig (geen levering, geen crash) en zie je terug in de journal.
+sudo systemctl enable --now sbom-naar-dtrack.timer
+
+echo "Klaar: Docker draait, Dependency-Track start op (duurt even bij de eerste keer), en de"
+echo "timer staat al aan. dt-bootstrap.py (hierna, via main.tf) regelt het admin-wachtwoord en de"
+echo "teams/API-keys zelf. Resterend handwerk: alleen nog het GitHub-token zelf aanmaken en in"
+echo "/etc/sbom-naar-dtrack.env zetten (GITHUB_TOKEN=...), zie README.md stap 6."

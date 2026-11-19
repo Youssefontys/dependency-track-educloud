@@ -22,11 +22,11 @@ Educloud-omgeving gedraaid.
 | `compose.yaml` | Dependency-Track 5.1.2: API-server, frontend en PostgreSQL 18.6, vast op digest, alleen op 127.0.0.1 |
 | `.env.example` | Het databasewachtwoord voor `compose.yaml` |
 | `sbom-naar-dtrack.py` | Haalt de SBoM op bij GitHub en levert hem aan Dependency-Track (alleen de standaardbibliotheek) |
-| `sbom-naar-dtrack.env.example` | Het token van GitHub en de API-key van Dependency-Track |
+| `sbom-naar-dtrack.env.example` | Het token van GitHub en de API-keys van Dependency-Track |
 | `sbom-naar-dtrack.service`, `.timer` | Draaien het script elk uur, als tijdelijke gebruiker zonder rechten |
 | `terraform/` | Zet de VM neer op Educloud en doet stap 1 t/m 4 van "Opzetten" voor je; optioneel, zie onder |
 | `terraform/check-verbinding.py` | Los van Terraform: checkt bereik en API-sleutels voor je iets aanmaakt |
-| `dt-bootstrap.py` | Doet stap 5 (wachtwoord) en de regels `DT_API_KEY` en `DT_READ_KEY` van stap 7, via Dependency-Track's eigen REST API |
+| `dt-bootstrap.py` | Doet stap 5 (wachtwoord, drie teams/keys: upload, lezen, instellingen) en zet OSV en (zodra het GitHub-token er is) GitHub Advisories aan als vulnerability-bron, via Dependency-Track's eigen REST API |
 | `dt-meting.py` | De twee metingen voor het onderzoek: elk uur een regel in `metingen.csv`, en de vergelijking met Trivy en de VEX |
 
 ## Wat de VM nodig heeft
@@ -62,11 +62,14 @@ Educloud-omgeving gedraaid.
    ```
    Dit moet draaien vanaf een machine die al op de Fontys-VPN zit: de provisioners verbinden na het
    aanmaken direct over SSH met het privé-IP van de VM, dezelfde eis als de tunnel in stap 4 hieronder.
-5. `terraform apply` draait na `bootstrap.sh` ook meteen `dt-bootstrap.py` op de VM: wachtwoord
-   zetten, team + permissies + API-key aanmaken via Dependency-Track's REST API, en `DT_API_KEY`
-   alvast in `/etc/sbom-naar-dtrack.env` zetten. Het admin-wachtwoord staat na afloop in
-   `/root/.dt-admin-password` op de VM (root-only). Ga daarna direct verder bij stap 6 hieronder
-   (het GitHub-token, dat kan niet geautomatiseerd).
+5. `bootstrap.sh` schakelt de timer van stap 9 hieronder meteen al in (die heeft geen token nodig).
+   Daarna draait `terraform apply` ook meteen `dt-bootstrap.py` op de VM: wachtwoord zetten, drie
+   teams + permissies + API-keys aanmaken (uploaden, lezen, instellingen) via Dependency-Track's
+   eigen REST API, en die alvast in `/etc/sbom-naar-dtrack.env` zetten. Ook OSV gaat dan meteen aan
+   als vulnerability-bron (geen token nodig); GitHub Advisories volgt zodra het GitHub-token er is,
+   zie stap 6. Het admin-wachtwoord staat na afloop in `/root/.dt-admin-password` op de VM
+   (root-only). Ga daarna direct verder bij stap 6 hieronder (het GitHub-token, dat kan niet
+   geautomatiseerd).
 
 ## Opzetten (met de hand, of verder na Terraform)
 
@@ -87,8 +90,11 @@ Educloud-omgeving gedraaid.
    Log in als `admin` met wachtwoord `admin`, en kies meteen een nieuw wachtwoord; Dependency-Track vraagt daar zelf om.
 5. Maak in Dependency-Track, onder Administration en Access Management, een team met alleen de permissies
    `BOM_UPLOAD` en `PROJECT_CREATION_UPLOAD`, en maak daar een API-key. De namen in de interface kunnen per versie
-   iets verschillen. Of: `sudo python3 dt-bootstrap.py` op de VM, doet dit (en het wachtwoord hierboven) via de
-   REST API; het admin-wachtwoord komt dan in `/root/.dt-admin-password` te staan.
+   iets verschillen. Of: `sudo python3 dt-bootstrap.py` op de VM, doet dit (en het wachtwoord hierboven, en nog
+   twee teams: lezen voor `dt-meting.py`, instellingen-wijzigen voor automatisering) via de REST API; het
+   admin-wachtwoord komt dan in `/root/.dt-admin-password` te staan. Hetzelfde script zet ook OSV en (als het
+   GitHub-token hieronder al bekend is) GitHub Advisories aan als vulnerability-bron naast NVD — zonder die
+   twee mist Dependency-Track de meeste PyPI-kwetsbaarheden die Trivy in de pipeline wel ziet.
 6. Maak op GitHub een fine-grained token: alleen de repository `secure-app`, alleen "Actions: Read-only", met
    een vervaldatum. Het artifact met de SBoM downloaden vraagt een token, ook bij een openbare repo.
 7. Zet het script en de instellingen op hun plek:
@@ -98,14 +104,14 @@ Educloud-omgeving gedraaid.
    sudo install -m 0600 sbom-naar-dtrack.env.example /etc/sbom-naar-dtrack.env
    sudo install -m 0644 sbom-naar-dtrack.service sbom-naar-dtrack.timer /etc/systemd/system/
    ```
-   Vul in `/etc/sbom-naar-dtrack.env` het token en de API-key in.
+   Vul in `/etc/sbom-naar-dtrack.env` het token en de API-keys in.
 8. Eén keer met de hand, en kijk in de log:
    ```bash
    sudo systemctl daemon-reload && sudo systemctl start sbom-naar-dtrack.service
    journalctl -u sbom-naar-dtrack.service -n 20
    ```
    Daarna staat het project `secure-app`, versie `main`, in Dependency-Track.
-9. Elk uur automatisch:
+9. Elk uur automatisch (via Terraform al gedaan door `bootstrap.sh`):
    ```bash
    sudo systemctl enable --now sbom-naar-dtrack.timer
    ```
@@ -150,3 +156,8 @@ alleen de een of de ander kent. De uitkomst staat ook in `/var/lib/sbom-naar-dtr
   na de upgrade notes van het project; Dependabot kijkt niet op de VM.
 - **Een token verloopt.** Na de vervaldatum faalt het script met HTTP 401; maak dan een nieuw token, met dezelfde
   rechten.
+- **NVD alleen is niet genoeg.** Dependency-Track matcht standaard alleen tegen NVD; voor met name PyPI-pakketten
+  mist dat de meeste kwetsbaarheden die Trivy in de pipeline wel vindt (CPE-matching werkt daar slecht voor).
+  `dt-bootstrap.py` zet daarom ook OSV en GitHub Advisories aan. Zelfs dan blijft een deel van de SBoM — de
+  OS-pakketten (`pkg:deb/...`) — buiten bereik: die komen bij Trivy uit Debian's eigen security tracker, een bron
+  die Dependency-Track niet heeft. Dat is dus geen configuratiefout maar een structurele grens.

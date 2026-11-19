@@ -1,6 +1,9 @@
 # Database-wachtwoord voor compose.yaml; nooit in git.
 .env
 
+# GitHub-token en Dependency-Track API-keys; nooit in git.
+sbom-naar-dtrack.env
+
 # Terraform: state en tfvars kunnen sleutels en wachtwoorden bevatten.
 terraform/.terraform/
 terraform/*.tfstate

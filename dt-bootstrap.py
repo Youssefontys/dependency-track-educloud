@@ -3,15 +3,30 @@ geforceerde admin-wachtwoord zetten, een team met de juiste permissies maken, en
 API-key voor genereren, in /etc/sbom-naar-dtrack.env. Draait op de VM zelf (praat met
 127.0.0.1:8080). Alleen de standaardbibliotheek.
 
+Zet daarnaast ook de dekking van Dependency-Track zelf goed: een derde team (dt-automation,
+SYSTEM_CONFIGURATION + PORTFOLIO_MANAGEMENT) met een eigen key, en zet OSV en (als GITHUB_TOKEN
+al bekend is) GitHub Advisories aan als vulnerability-bron, naast de standaard NVD. Zonder dat
+matcht Dependency-Track alleen tegen NVD, wat voor met name PyPI-pakketten veel minder vindt dan
+Trivy in de pipeline (zie 6.2, paragraaf na "Aanvullend onderzoek").
+
 Alleen GitHub's fine-grained token (stap 6) blijft handwerk: GitHub heeft bewust geen API om
 een nieuw token te laten aanmaken door een ander token, dat zou zelf een manier zijn om rechten
-te verhogen. Dat ene stuk kan dus niet, de rest hieronder wel.
+te verhogen. Dat ene stuk kan dus niet, de rest hieronder wel. Staat het token er nog niet, dan
+slaat dit script het GitHub-Advisories-deel over (OSV gaat wel door, die heeft geen token
+nodig); draai het dan gewoon opnieuw zodra GITHUB_TOKEN wel in het env-bestand staat.
 
 Endpoints gecontroleerd tegen de echte 5.1.2-broncode (UserResource.java, TeamResource.java,
 PermissionResource.java in DependencyTrack/dependency-track), niet uit het hoofd. Onzeker:
 of het antwoord van PUT /v1/team/{uuid}/key echt een los "key"-veld met de volledige,
 bruikbare sleutel teruggeeft (zo lijkt het uit Alpine's ApiKey-model, maar nog niet getest
 tegen een echte server).
+
+De secrets/extension-points/vuln-data-sources-endpoints zijn v2-endpoints die niet in
+/api/openapi.json staan (nog niet gedocumenteerd, kennelijk); gevonden door de requestUri's in
+de eigen apiserver-log te lezen na het één keer met de hand instellen via de UI, en de
+config-velden gecontroleerd tegen de JSON-schema's in vuln-data-source/github en .../osv op
+dezelfde 5.1.2-tag. Dat maakt dit stuk kwetsbaarder voor een volgende Dependency-Track-versie
+dan de rest van dit script, dat tegen de wél-gedocumenteerde v1-API praat.
 
 Herhaald draaien is veilig: slaat het wachtwoord zetten en de API-key over als ze al eerder
 gelukt zijn (te zien aan /root/.dt-admin-password en een niet-lege DT_API_KEY in het env-bestand).
@@ -28,6 +43,7 @@ import urllib.parse
 import urllib.request
 
 BASE = "http://127.0.0.1:8080/api/v1"
+BASE_V2 = "http://127.0.0.1:8080/api/v2"
 ENV_FILE = "/etc/sbom-naar-dtrack.env"
 PASSWORD_FILE = "/root/.dt-admin-password"
 TEAM_NAME = "sbom-naar-dtrack"
@@ -36,9 +52,15 @@ PERMISSIONS = ("BOM_UPLOAD", "PROJECT_CREATION_UPLOAD")
 # (FindingResource.java); het opzoeken van het project op naam VIEW_PORTFOLIO.
 READ_TEAM_NAME = "dt-meting"
 READ_PERMISSIONS = ("VIEW_PORTFOLIO", "VIEW_VULNERABILITY")
+# Voor instellingen wijzigen en sq4-achtige testprojecten opruimen; geen van beide mag de andere
+# twee teams, die blijven expres uploaden/lezen.
+CONFIG_TEAM_NAME = "dt-automation"
+CONFIG_PERMISSIONS = ("SYSTEM_CONFIGURATION", "PORTFOLIO_MANAGEMENT")
+GITHUB_TOKEN_VAR = "GITHUB_TOKEN"
+GITHUB_SECRET_NAME = "github-advisories-token"
 
 
-def request(method, path, body=None, token=None, form=None):
+def request(method, path, body=None, token=None, form=None, base=BASE):
     # Niet alleen application/json eisen: forceChangePassword en login geven text/plain terug,
     # en kregen daardoor een 406 van de server toen dit nog hard op json stond.
     headers = {"Accept": "*/*"}
@@ -51,7 +73,7 @@ def request(method, path, body=None, token=None, form=None):
         headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(f"{BASE}{path}", data=data, method=method, headers=headers)
+    req = urllib.request.Request(f"{base}{path}", data=data, method=method, headers=headers)
     # urlopen gooit bij elke status van 300 of hoger een HTTPError; dan kwam de code hieronder nooit bij een 409
     # ("team bestaat al") of 304 ("permissie stond er al"). Daarom de status teruggeven in plaats van stoppen.
     try:
@@ -162,16 +184,111 @@ def ensure_api_key(token, team_uuid, variable):
     print(f"API-key gegenereerd en als {variable} in {ENV_FILE} gezet.")
 
 
+def get_env_value(variable):
+    try:
+        with open(ENV_FILE, encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return None
+    for line in lines:
+        if line.startswith(f"{variable}=") and line.strip() != f"{variable}=":
+            return line.strip().split("=", 1)[1]
+    return None
+
+
+def ensure_secret(token, name, value, description):
+    status, body = request("GET", "/secrets", token=token, base=BASE_V2)
+    if status != 200:
+        sys.exit(f"Secrets opvragen gaf status {status}.")
+    if any(s["name"] == name for s in json.loads(body)["items"]):
+        print(f"Secret '{name}' bestaat al, hergebruiken (waarde wordt niet overschreven).")
+        return
+    status, _ = request(
+        "POST", "/secrets", body={"name": name, "value": value, "description": description},
+        token=token, base=BASE_V2,
+    )
+    if status not in (200, 201):
+        sys.exit(f"Secret '{name}' aanmaken gaf status {status}.")
+    print(f"Secret '{name}' aangemaakt.")
+
+
+def _same_value(a, b):
+    # Voor lijsten (zoals OSV's ecosystems) maakt de volgorde niet uit, voor de rest wel.
+    if isinstance(a, list) and isinstance(b, list):
+        return sorted(a) == sorted(b)
+    return a == b
+
+
+def ensure_vuln_data_source(token, name, desired):
+    """Zet een vulnerability-bron (github/osv/...) op de gewenste config. Triggert alleen een
+    mirror-run bij de overgang van uit naar aan, niet bij elke herhaalde run (anders loop je
+    GitHub's rate-limit elke keer opnieuw tegen het lijf zonder dat er iets veranderd is)."""
+    status, body = request("GET", f"/extension-points/vuln-data-source/extensions/{name}/config", token=token, base=BASE_V2)
+    current = json.loads(body)["config"] if status == 200 else {}
+    if current.get("enabled") and all(_same_value(current.get(k), v) for k, v in desired.items()):
+        print(f"Vulnerability-bron '{name}' staat al zoals gewenst, niets gewijzigd.")
+        return
+    was_enabled = bool(current.get("enabled"))
+    # De PUT verwacht, net als het GET-antwoord, het object gewrapt in "config" (zonder wrapper:
+    # 400 "JSON Processing Failed", met curl tegen de live server getest).
+    status, _ = request(
+        "PUT", f"/extension-points/vuln-data-source/extensions/{name}/config", body={"config": desired},
+        token=token, base=BASE_V2,
+    )
+    if status != 200:
+        sys.exit(f"Instellen van vulnerability-bron '{name}' gaf status {status}.")
+    print(f"Vulnerability-bron '{name}' ingesteld.")
+    if desired.get("enabled") and not was_enabled:
+        status, _ = request("POST", f"/vuln-data-sources/{name}/mirror-runs", body={}, token=token, base=BASE_V2)
+        if status not in (200, 201, 202):
+            print(f"Let op: mirror-run voor '{name}' triggeren gaf status {status}; zelf op 'Mirror now' klikken.")
+        else:
+            print(f"Mirror-run voor '{name}' getriggerd.")
+
+
 def main():
     wait_for_dt()
     token = get_admin_token()
-    # Twee teams, elk met alleen wat het nodig heeft: leveren mag niet lezen, meten mag niet leveren.
-    for name, permissions, variable in ((TEAM_NAME, PERMISSIONS, "DT_API_KEY"), (READ_TEAM_NAME, READ_PERMISSIONS, "DT_READ_KEY")):
+    # Drie teams, elk met alleen wat het nodig heeft: leveren mag niet lezen, meten mag niet leveren,
+    # instellingen-wijzigen mag geen van beide.
+    for name, permissions, variable in (
+        (TEAM_NAME, PERMISSIONS, "DT_API_KEY"),
+        (READ_TEAM_NAME, READ_PERMISSIONS, "DT_READ_KEY"),
+        (CONFIG_TEAM_NAME, CONFIG_PERMISSIONS, "DT_CONFIG_KEY"),
+    ):
         team_uuid = get_or_create_team(token, name)
         grant_permissions(token, team_uuid, permissions)
         ensure_api_key(token, team_uuid, variable)
-    print("\nKlaar. Resterend handwerk: alleen nog het GitHub-token zelf aanmaken en in "
-          f"{ENV_FILE} zetten (GITHUB_TOKEN=...), en dan:")
+
+    # OSV heeft geen token nodig en kan dus altijd meteen aan; NVD staat al standaard aan.
+    ensure_vuln_data_source(token, "osv", {
+        "enabled": True,
+        "aliasSyncEnabled": False,
+        "incrementalMirroringEnabled": True,
+        "dataUrl": "https://storage.googleapis.com/osv-vulnerabilities",
+        "ecosystems": ["PyPI", "NuGet", "npm", "Go", "Maven"],
+    })
+
+    github_token = get_env_value(GITHUB_TOKEN_VAR)
+    if not github_token:
+        print(f"\nGitHub Advisories nog niet aangezet: {GITHUB_TOKEN_VAR} staat nog niet in {ENV_FILE}.")
+        print("\nKlaar, op GitHub Advisories na. Resterend handwerk: nog het GitHub-token zelf aanmaken en in "
+              f"{ENV_FILE} zetten (GITHUB_TOKEN=...) — dit script dan opnieuw draaien zet GitHub "
+              "Advisories er ook nog bij (veilig, idempotent). Daarna:")
+        print("  sudo systemctl daemon-reload && sudo systemctl start sbom-naar-dtrack.service")
+        print("  sudo systemctl enable --now sbom-naar-dtrack.timer")
+        return
+
+    ensure_secret(token, GITHUB_SECRET_NAME, github_token,
+                  f"GitHub-token voor de Advisories-mirror, hergebruikt uit {ENV_FILE}.")
+    ensure_vuln_data_source(token, "github", {
+        "enabled": True,
+        "aliasSyncEnabled": True,
+        "apiUrl": "https://api.github.com/graphql",
+        "apiToken": GITHUB_SECRET_NAME,
+    })
+    print("\nKlaar, inclusief GitHub Advisories en OSV. Resterend handwerk: alleen nog, als dit de "
+          "eerste keer is, de timer inschakelen:")
     print("  sudo systemctl daemon-reload && sudo systemctl start sbom-naar-dtrack.service")
     print("  sudo systemctl enable --now sbom-naar-dtrack.timer")
 
