@@ -53,9 +53,12 @@ PERMISSIONS = ("BOM_UPLOAD", "PROJECT_CREATION_UPLOAD")
 READ_TEAM_NAME = "dt-meting"
 READ_PERMISSIONS = ("VIEW_PORTFOLIO", "VIEW_VULNERABILITY")
 # Voor instellingen wijzigen en sq4-achtige testprojecten opruimen; geen van beide mag de andere
-# twee teams, die blijven expres uploaden/lezen.
+# twee teams, die blijven expres uploaden/lezen. SECRET_MANAGEMENT_CREATE/_UPDATE expliciet erbij,
+# niet de brede SECRET_MANAGEMENT: alleen aanmaken en bijwerken, nooit verwijderen (dat gebruikt dit
+# script niet). Zonder deze twee kan ensure_secret() een bestaand secret niet bijwerken (403) —
+# gecontroleerd tegen Permissions.java en secret.yaml (OpenAPI) op dezelfde 5.1.2-tag.
 CONFIG_TEAM_NAME = "dt-automation"
-CONFIG_PERMISSIONS = ("SYSTEM_CONFIGURATION", "PORTFOLIO_MANAGEMENT")
+CONFIG_PERMISSIONS = ("SYSTEM_CONFIGURATION", "PORTFOLIO_MANAGEMENT", "SECRET_MANAGEMENT_CREATE", "SECRET_MANAGEMENT_UPDATE")
 GITHUB_TOKEN_VAR = "GITHUB_TOKEN"
 GITHUB_SECRET_NAME = "github-advisories-token"
 
@@ -197,11 +200,20 @@ def get_env_value(variable):
 
 
 def ensure_secret(token, name, value, description):
+    """Maakt het secret aan, of werkt het bij als het al bestaat. Niet zomaar overslaan als het al
+    bestaat: GITHUB_TOKEN verloopt en wordt dan vervangen (zie README, "Een token verloopt"), en
+    zonder deze update zou de GitHub Advisories-mirror in Dependency-Track op de oude, verlopen
+    waarde blijven hangen terwijl dit script zelf "in orde" blijft melden."""
     status, body = request("GET", "/secrets", token=token, base=BASE_V2)
     if status != 200:
         sys.exit(f"Secrets opvragen gaf status {status}.")
     if any(s["name"] == name for s in json.loads(body)["items"]):
-        print(f"Secret '{name}' bestaat al, hergebruiken (waarde wordt niet overschreven).")
+        # PATCH, niet PUT: alleen update bestaat op /secrets/{name} (secret.yaml in de 5.1.2-broncode).
+        status, _ = request("PATCH", f"/secrets/{name}", body={"value": value, "description": description},
+                            token=token, base=BASE_V2)
+        if status not in (204, 304):
+            sys.exit(f"Secret '{name}' bijwerken gaf status {status}.")
+        print(f"Secret '{name}' bestond al; waarde en omschrijving bijgewerkt (status {status}).")
         return
     status, _ = request(
         "POST", "/secrets", body={"name": name, "value": value, "description": description},
@@ -213,9 +225,11 @@ def ensure_secret(token, name, value, description):
 
 
 def _same_value(a, b):
-    # Voor lijsten (zoals OSV's ecosystems) maakt de volgorde niet uit, voor de rest wel.
-    if isinstance(a, list) and isinstance(b, list):
-        return sorted(a) == sorted(b)
+    # Voor lijsten (zoals OSV's ecosystems) maakt de volgorde niet uit, voor de rest wel. "ecosystems"
+    # is geen verplicht veld in het schema, dus a kan None zijn ook als "enabled" al true staat;
+    # sorted(None) zou dan met een kale TypeError crashen in plaats van gewoon "niet gelijk" te zijn.
+    if isinstance(b, list):
+        return sorted(a or []) == sorted(b)
     return a == b
 
 
